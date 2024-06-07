@@ -1,0 +1,99 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  This template creates the Backup Restore Testing Plan and Resource assignment to that plan. RestoreTestingPlan is required for the automated centralized backup at scale in AWS Organizations using AWS Backup.
+  It should be deployed in each member account.
+Parameters:
+  BackupRestoreTestingIAMRole:
+    Type: String
+    Description: This is the name for the backup RestoreTesting role that carries out the RestoreTesting activities.
+  RestoreTestingPlanName:
+    Type: String
+    Description: This is the name for RestoreTestingPlan. 
+  BackupVaultName:
+    Type: String
+    Description: This is the name of the Backup Vault that RestoreTesting is run. 
+  TagKey:
+    Type: String
+    Description: This is the key for a tag.
+  TagValue:
+    Type: String
+    Description: This is the value for a tag.
+  RestoreResourceType:
+    Type: String
+    Description: This is the resource type for RestoreTesting jobs supported by AWS Backup.
+    AllowedValues:
+      - Aurora
+      - DocumentDB
+      - DynamoDB
+      - EBS
+      - EC2
+      - EFS
+      - FSx
+      - Neptune
+      - RDS
+      - S3
+  RestoreTestingSelectionName:
+    Type: String
+    Description: This is the unique name of the restore testing selection that belongs to the related restore testing plan. 
+  ValidationWindowHours:
+    Type: String
+    Description: This is the amount of hours(1 to 168) available to run a validation script on the data. 
+  RestoreResourceSelectionTagKey:
+    Type: String
+    Description: This is the tag key to select specific resources for RestoreTesting with matching tag keys.
+  RestoreResourceSelectionTagValue:
+    Type: String
+    Description: This is the tag value to select specific resources for RestoreTesting with matching tag values.
+Resources:
+  BackupRestoreTestingRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      Description: Allows AWS Backup to do RestoreTesting for allocated resources
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - backup.amazonaws.com
+            Action:
+              - "sts:AssumeRole"
+      Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSBackupServiceRolePolicyForBackup
+        - arn:aws:iam::aws:policy/service-role/AWSBackupServiceRolePolicyForRestores
+      RoleName: !Sub ${BackupRestoreTestingIAMRole}
+      Tags:
+        - Key: !Ref TagKey
+          Value: !Ref TagValue
+  BackupRestoreTesting:
+    Type: AWS::Backup::RestoreTestingPlan
+    Properties:
+      RecoveryPointSelection: 
+        Algorithm: "LATEST_WITHIN_WINDOW"
+        IncludeVaults: 
+          - !Sub "arn:aws:backup:${AWS::Region}:${AWS::AccountId}:backup-vault:${BackupVaultName}"
+        RecoveryPointTypes: 
+          - "SNAPSHOT"
+        SelectionWindowDays: 7
+      RestoreTestingPlanName: !Ref RestoreTestingPlanName
+      ScheduleExpression: "cron(45 6 * * ? *)"
+      StartWindowHours: 1
+      Tags:
+        - Key: !Ref TagKey
+          Value: !Ref TagValue
+  BackupRestoreSelection:
+    Type: AWS::Backup::RestoreTestingSelection
+    DependsOn: BackupRestoreTesting
+    Properties:
+      IamRoleArn: !Sub arn:aws:iam::${AWS::AccountId}:role/${BackupRestoreTestingIAMRole}
+      ProtectedResourceArns: 
+        - "*"
+      ProtectedResourceConditions: 
+        StringEquals: 
+          - Key: !Sub aws:ResourceTag/${RestoreResourceSelectionTagKey}
+            Value: !Ref RestoreResourceSelectionTagValue
+      ProtectedResourceType: !Ref RestoreResourceType
+      RestoreTestingPlanName: !Ref RestoreTestingPlanName
+      RestoreTestingSelectionName: !Ref RestoreTestingSelectionName
+      ValidationWindowHours: !Ref ValidationWindowHours
